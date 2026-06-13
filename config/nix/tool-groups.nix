@@ -17,6 +17,7 @@ in
     jq
     just
     nodejs_22
+    nodePackages.typescript
     ripgrep
     unzip
   ];
