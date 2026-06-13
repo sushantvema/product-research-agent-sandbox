@@ -53,6 +53,12 @@ Read the hook and formatting policy:
 open FORMATTING.md
 ```
 
+Read the high-level operator experience guide:
+
+```bash
+open ERGONOMICS.md
+```
+
 ## Principles
 
 - Prefer declarative configuration over one-off shell setup.
@@ -94,6 +100,7 @@ This separation is intentional. In an agent-heavy workflow, the surrounding syst
 - `config/shell/`: repo-owned shell snippets layered into sandbox startup
 - `.pre-commit-config.yaml`: `prek` hook configuration
 - `FORMATTING.md`: hook policy and rationale for custom settings
+- `ERGONOMICS.md`: high-level operator experience inside the sandbox
 - `config/host-mounts.sh`: host mount helpers
 - `config/runtime-flags.sh`: runtime hardening defaults
 - `config/guardrails.sh`: measurement defaults and size limits
@@ -120,6 +127,14 @@ This repo uses `prek`, the fast Rust-based pre-commit alternative, for local hoo
 The tracked hook config lives in `.pre-commit-config.yaml`. It intentionally uses `repo: builtin` for the common hygiene hooks, which means the config is optimized for `prek` rather than stock `pre-commit`.
 
 See `FORMATTING.md` for the exact hook policy and the reasoning behind each non-default setting.
+
+If the host does not already have a native `prek` binary, install the repo's sandbox-backed local hook shim with:
+
+```bash
+./bin/install-hooks
+```
+
+That hook uses `bin/prek-in-sandbox`, which runs `prek` inside the sandbox image against the repo bind-mounted as the workspace.
 
 Once GitHub is configured for this repo, the `.github/workflows/prek.yml` workflow should also be marked as a required check in branch protection.
 

@@ -72,7 +72,18 @@ This catches syntax errors early without introducing a broader JavaScript format
 
 ## Installing Hooks
 
-Once this directory is a Git repository and `prek` is available in the environment:
+This repo can run hooks in two ways:
+
+1. Preferred here: install the sandbox-backed hook shim, which does not require a native host `prek` binary.
+2. Optional: run `prek install` directly if `prek` is already installed on the host.
+
+Install the sandbox-backed hook shim with:
+
+```bash
+./bin/install-hooks
+```
+
+If you already have native `prek` on the host, this also works:
 
 ```bash
 prek install
@@ -84,4 +95,4 @@ Run all hooks on demand with:
 prek run --all-files
 ```
 
-Because this repo is not yet initialized as a Git repository in the current workspace, hook installation may not be possible until Git is set up.
+The sandbox-backed hook uses `bin/prek-in-sandbox`, which bind-mounts this repo as the sandbox workspace and runs `prek` inside the sandbox image.

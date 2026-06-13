@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+HOOK_DIR="$(git -C "$REPO_ROOT" rev-parse --git-path hooks)"
+PRE_COMMIT_HOOK="$HOOK_DIR/pre-commit"
+
+mkdir -p "$HOOK_DIR"
+
+cat > "$PRE_COMMIT_HOOK" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+exec "$repo_root/bin/prek-in-sandbox" run
+EOF
+
+chmod +x "$PRE_COMMIT_HOOK"
+
+printf 'Installed pre-commit hook at %s\n' "$PRE_COMMIT_HOOK"
