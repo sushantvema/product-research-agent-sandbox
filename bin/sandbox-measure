@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+source "$(dirname "$0")/../config/guardrails.sh"
+
+CONFIG_DIR="$(dirname "$0")/../config"
+LOCAL_CONFIG_FILE="$CONFIG_DIR/sandbox.jsonc"
+EXAMPLE_CONFIG_FILE="$CONFIG_DIR/sandbox.example.jsonc"
+
+read_config() {
+  local key_path="$1"
+
+  if [[ -f "$LOCAL_CONFIG_FILE" ]] && node "$CONFIG_DIR/read-config.mjs" "$LOCAL_CONFIG_FILE" "$key_path" 2>/dev/null; then
+    return
+  fi
+
+  node "$CONFIG_DIR/read-config.mjs" "$EXAMPLE_CONFIG_FILE" "$key_path"
+}
+
+export SANDBOX_MAX_IMAGE_SIZE_MB="${SANDBOX_MAX_IMAGE_SIZE_MB:-$(read_config measurement.maxImageSizeMb)}"
+export SANDBOX_MAX_HOME_SIZE_MB="${SANDBOX_MAX_HOME_SIZE_MB:-$(read_config measurement.maxHomeSizeMb)}"
+
+IMAGE_NAME="${SANDBOX_IMAGE:-$(read_config imageName)}"
+HOME_VOLUME="${SANDBOX_HOME_VOLUME:-$(read_config homeVolumeName)}"
+
+now_ms() {
+  perl -MTime::HiRes=time -e 'printf "%.0f\n", time() * 1000'
+}
+
+ensure_image() {
+  if ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
+    ./bin/sandbox --rebuild true >/dev/null
+  fi
+}
+
+image_size_mb() {
+  docker image inspect "$IMAGE_NAME" --format '{{.Size}}' | awk '{printf "%d\n", $1 / 1024 / 1024}'
+}
+
+home_size_mb() {
+  docker volume create "$HOME_VOLUME" >/dev/null
+  docker run --rm \
+    -v "$HOME_VOLUME:/home/sandbox" \
+    "$IMAGE_NAME" \
+    bash -lc 'du -sm /home/sandbox 2>/dev/null | awk "{print \$1}"'
+}
+
+startup_ms() {
+  local start
+  local end
+
+  start="$(now_ms)"
+  ./bin/sandbox true >/dev/null
+  end="$(now_ms)"
+
+  printf '%d\n' "$((end - start))"
+}
+
+ensure_image
+
+image_mb="$(image_size_mb)"
+home_mb="$(home_size_mb)"
+startup="$(startup_ms)"
+
+sandbox_check_limit "image_size" "$image_mb" "$SANDBOX_MAX_IMAGE_SIZE_MB"
+sandbox_check_limit "home_volume_size" "$home_mb" "$SANDBOX_MAX_HOME_SIZE_MB"
+printf 'startup_time_ms: %s\n' "$startup"

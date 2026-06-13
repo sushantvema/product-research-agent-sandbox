@@ -1,0 +1,23 @@
+name: Skills Audit
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  skills-audit:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run repo-level skills audit
+        run: node config/skills-catalog.mjs audit "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/config/skills-audit-ignore.txt"

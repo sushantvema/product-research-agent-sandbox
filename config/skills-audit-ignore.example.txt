@@ -1,0 +1,14 @@
+# Optional local suppressions for `./bin/sandbox skills audit`.
+#
+# Copy this file to `config/skills-audit-ignore.txt` to suppress known false
+# positives in your own workflow without changing the tracked hard-coded audit
+# baseline.
+#
+# Format:
+# - one case-insensitive literal substring per line
+# - blank lines are ignored
+# - lines starting with `#` are comments
+#
+# Example:
+# /workspace/content
+# product research

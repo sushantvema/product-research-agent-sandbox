@@ -1,0 +1,366 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+source "$REPO_ROOT/config/host-mounts.sh"
+source "$REPO_ROOT/config/runtime-flags.sh"
+
+CONFIG_DIR="$REPO_ROOT/config"
+LOCAL_CONFIG_FILE="$CONFIG_DIR/sandbox.jsonc"
+EXAMPLE_CONFIG_FILE="$CONFIG_DIR/sandbox.example.jsonc"
+
+read_config() {
+  local key_path="$1"
+
+  if [[ -f "$LOCAL_CONFIG_FILE" ]] && node "$CONFIG_DIR/read-config.mjs" "$LOCAL_CONFIG_FILE" "$key_path" 2>/dev/null; then
+    return
+  fi
+
+  node "$CONFIG_DIR/read-config.mjs" "$EXAMPLE_CONFIG_FILE" "$key_path"
+}
+
+resolve_repo_path() {
+  local path="$1"
+
+  if [[ "$path" = /* ]]; then
+    printf '%s\n' "$path"
+    return
+  fi
+
+  printf '%s/%s\n' "$REPO_ROOT" "$path"
+}
+
+build_image_if_needed() {
+  if [[ $REBUILD -eq 1 ]] || ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
+    docker build -f "$REPO_ROOT/config/Dockerfile" -t "$IMAGE_NAME" "$REPO_ROOT"
+  fi
+}
+
+run_workspace_helper() {
+  local docker_args=()
+  local helper_args=()
+  local parsing_docker_args=1
+
+  build_image_if_needed
+
+  for arg in "$@"; do
+    if [[ $parsing_docker_args -eq 1 && "$arg" == "--" ]]; then
+      parsing_docker_args=0
+      continue
+    fi
+
+    if [[ $parsing_docker_args -eq 1 ]]; then
+      docker_args+=( "$arg" )
+      continue
+    fi
+
+    helper_args+=( "$arg" )
+  done
+
+  docker run --rm \
+    --user "$USER_ID:$GROUP_ID" \
+    --entrypoint node \
+    -v "$REPO_ROOT:/repo:ro" \
+    "${WORKSPACE_HELPER_MOUNT_ARGS[@]}" \
+    "${docker_args[@]}" \
+    "$IMAGE_NAME" \
+    /repo/config/skills-catalog.mjs \
+    "${helper_args[@]}"
+}
+
+sandbox_skills_index() {
+  run_workspace_helper -- index /workspace text
+}
+
+sandbox_skills_export() {
+  local timestamp skills_export_root
+
+  timestamp="$(date -u +"%Y%m%dT%H%M%SZ")"
+  skills_export_root="$EXPORT_ROOT/skills/$timestamp"
+
+  mkdir -p "$skills_export_root"
+
+  run_workspace_helper \
+    -v "$skills_export_root:/export" \
+    -- \
+    export /workspace /export "$@"
+
+  printf 'Skills export root: %s\n' "$skills_export_root"
+}
+
+sandbox_skills_audit() {
+  run_workspace_helper -- audit /workspace /repo/config/skills-audit-ignore.txt
+}
+
+sandbox_sync_control_plane() {
+  build_image_if_needed
+
+  if [[ -z "$HOME_BIND" ]]; then
+    docker volume create "$HOME_VOLUME" >/dev/null
+  fi
+
+  if [[ -z "$WORKSPACE_BIND" ]]; then
+    docker volume create "$WORKSPACE_VOLUME" >/dev/null
+  fi
+
+  docker run --rm \
+    --entrypoint bash \
+    -e HOME=/home/sandbox \
+    -e XDG_CONFIG_HOME=/home/sandbox/.config \
+    -e XDG_CACHE_HOME=/home/sandbox/.cache \
+    -e XDG_DATA_HOME=/home/sandbox/.local/share \
+    -e XDG_STATE_HOME=/home/sandbox/.local/state \
+    "${HOME_MOUNT_ARGS[@]}" \
+    "${WORKSPACE_MOUNT_ARGS[@]}" \
+    "${CONTROL_PLANE_MOUNT_ARGS[@]}" \
+    "$IMAGE_NAME" \
+    -lc "/usr/local/bin/sync-control-plane.sh && chown -R $USER_ID:$GROUP_ID /home/sandbox /workspace"
+}
+
+sandbox_export_workspace() {
+  local timestamp snapshot_dir source_label
+
+  timestamp="$(date -u +"%Y%m%dT%H%M%SZ")"
+  snapshot_dir="$EXPORT_ROOT/workspace-$timestamp"
+
+  mkdir -p "$snapshot_dir"
+
+  if [[ -n "$WORKSPACE_BIND" ]]; then
+    if [[ ! -d "$WORKSPACE_BIND" ]]; then
+      printf 'workspace bind path does not exist: %s\n' "$WORKSPACE_BIND" >&2
+      exit 1
+    fi
+
+    cp -a "$WORKSPACE_BIND/." "$snapshot_dir/"
+    source_label="$WORKSPACE_BIND"
+  else
+    if ! docker volume inspect "$WORKSPACE_VOLUME" >/dev/null 2>&1; then
+      printf 'workspace volume does not exist: %s\n' "$WORKSPACE_VOLUME" >&2
+      exit 1
+    fi
+
+    build_image_if_needed
+    docker run --rm \
+      --user "$USER_ID:$GROUP_ID" \
+      --entrypoint bash \
+      -v "$WORKSPACE_VOLUME:/workspace:ro" \
+      -v "$snapshot_dir:/export" \
+      "$IMAGE_NAME" \
+      -lc 'cp -a /workspace/. /export/'
+    source_label="$WORKSPACE_VOLUME"
+  fi
+
+  printf 'Exported workspace snapshot to %s\n' "$snapshot_dir"
+  printf 'Snapshot source: %s\n' "$source_label"
+}
+
+export SANDBOX_DISABLE_HARDENING="${SANDBOX_DISABLE_HARDENING:-$(read_config runtime.disableHardening)}"
+export SANDBOX_PID_LIMIT="${SANDBOX_PID_LIMIT:-$(read_config runtime.pidLimit)}"
+export SANDBOX_READ_ONLY_ROOT="${SANDBOX_READ_ONLY_ROOT:-$(read_config runtime.readOnlyRoot)}"
+
+IMAGE_NAME="${SANDBOX_IMAGE:-$(read_config imageName)}"
+HOME_VOLUME="${SANDBOX_HOME_VOLUME:-$(read_config homeVolumeName)}"
+WORKSPACE_VOLUME="${SANDBOX_WORKSPACE_VOLUME:-$(read_config workspaceVolumeName)}"
+EXPORT_ROOT="$(resolve_repo_path "${SANDBOX_EXPORT_DIR:-$(read_config exportDirectory)}")"
+HOME_BIND="${SANDBOX_HOME_BIND:-}"
+WORKSPACE_BIND="${SANDBOX_WORKSPACE_BIND:-}"
+PORTS="${SANDBOX_PORTS:-}"
+HOST_GH_CONFIG_FILE="${SANDBOX_GH_CONFIG_FILE:-$HOME/.config/gh/config.yml}"
+HOST_GITCONFIG="${SANDBOX_GITCONFIG:-$HOME/.gitconfig}"
+REBUILD=0
+
+export SANDBOX_BOOTSTRAP_QUARTZ="${SANDBOX_BOOTSTRAP_QUARTZ:-$(read_config bootstrap.quartz.enabled)}"
+export SANDBOX_QUARTZ_TEMPLATE="${SANDBOX_QUARTZ_TEMPLATE:-$(read_config bootstrap.quartz.template)}"
+export SANDBOX_QUARTZ_BASE_URL="${SANDBOX_QUARTZ_BASE_URL:-$(read_config bootstrap.quartz.baseUrl)}"
+export SANDBOX_QUARTZ_LINKS="${SANDBOX_QUARTZ_LINKS:-$(read_config bootstrap.quartz.links)}"
+
+if [[ "${1:-}" == "--rebuild" ]]; then
+  REBUILD=1
+  shift
+fi
+
+COMMAND="${1:-}"
+if [[ "$COMMAND" == "export" || "$COMMAND" == "sync" ]]; then
+  shift
+
+  if [[ $# -gt 0 ]]; then
+    printf 'usage: %s [--rebuild] %s\n' "$0" "$COMMAND" >&2
+    exit 1
+  fi
+fi
+
+SKILLS_SUBCOMMAND=""
+if [[ "$COMMAND" == "skills" ]]; then
+  SKILLS_SUBCOMMAND="${2:-}"
+
+  if [[ -z "$SKILLS_SUBCOMMAND" ]]; then
+    printf 'usage: %s [--rebuild] skills <index|export|audit> [selectors...]\n' "$0" >&2
+    exit 1
+  fi
+
+  if [[ "$SKILLS_SUBCOMMAND" != "index" && "$SKILLS_SUBCOMMAND" != "export" && "$SKILLS_SUBCOMMAND" != "audit" ]]; then
+    printf 'unsupported skills subcommand: %s\n' "$SKILLS_SUBCOMMAND" >&2
+    exit 1
+  fi
+
+  if [[ "$SKILLS_SUBCOMMAND" == "index" && $# -ne 2 ]]; then
+    printf 'usage: %s [--rebuild] skills index\n' "$0" >&2
+    exit 1
+  fi
+
+  if [[ "$SKILLS_SUBCOMMAND" == "export" && $# -lt 3 ]]; then
+    printf 'usage: %s [--rebuild] skills export --all|<selector> [selector...]\n' "$0" >&2
+    exit 1
+  fi
+
+  if [[ "$SKILLS_SUBCOMMAND" == "audit" && $# -ne 2 ]]; then
+    printf 'usage: %s [--rebuild] skills audit\n' "$0" >&2
+    exit 1
+  fi
+fi
+
+if ! command -v docker >/dev/null 2>&1; then
+  printf 'docker is required on the host.\n' >&2
+  exit 1
+fi
+
+USER_ID="$(id -u)"
+GROUP_ID="$(id -g)"
+
+FORWARDED_GH_TOKEN=""
+if command -v gh >/dev/null 2>&1; then
+  FORWARDED_GH_TOKEN="$(gh auth token 2>/dev/null || true)"
+fi
+
+ENV_ARGS=()
+if [[ -n "$FORWARDED_GH_TOKEN" ]]; then
+  export GH_TOKEN="$FORWARDED_GH_TOKEN"
+  export GITHUB_TOKEN="$FORWARDED_GH_TOKEN"
+  ENV_ARGS+=( -e GH_TOKEN -e GITHUB_TOKEN )
+fi
+
+HOME_MOUNT_ARGS=()
+if [[ -n "$HOME_BIND" ]]; then
+  mkdir -p \
+    "$HOME_BIND/.config" \
+    "$HOME_BIND/.cache" \
+    "$HOME_BIND/.local/share" \
+    "$HOME_BIND/.local/state"
+
+  HOME_MOUNT_ARGS=( -v "$HOME_BIND:/home/sandbox" )
+else
+  HOME_MOUNT_ARGS=( -v "$HOME_VOLUME:/home/sandbox" )
+fi
+
+WORKSPACE_MOUNT_ARGS=()
+if [[ -n "$WORKSPACE_BIND" ]]; then
+  mkdir -p "$WORKSPACE_BIND"
+  WORKSPACE_MOUNT_ARGS=( -v "$WORKSPACE_BIND:/workspace" )
+  WORKSPACE_HELPER_MOUNT_ARGS=( -v "$WORKSPACE_BIND:/workspace:ro" )
+else
+  WORKSPACE_MOUNT_ARGS=( -v "$WORKSPACE_VOLUME:/workspace" )
+  WORKSPACE_HELPER_MOUNT_ARGS=( -v "$WORKSPACE_VOLUME:/workspace:ro" )
+fi
+
+EXTRA_MOUNT_ARGS=()
+sandbox_add_file_mount_if_present "$HOST_GH_CONFIG_FILE" "/home/sandbox/.config/gh/config.yml"
+sandbox_add_file_mount_if_present "$HOST_GITCONFIG" "/home/sandbox/.gitconfig-host"
+
+CONTROL_PLANE_MOUNT_ARGS=(
+  -v "$REPO_ROOT/config/bashrc:/etc/sandbox/bashrc:ro"
+  -v "$REPO_ROOT/config/bootstrap-workspace.sh:/usr/local/bin/bootstrap-workspace.sh:ro"
+  -v "$REPO_ROOT/config/sync-control-plane.sh:/usr/local/bin/sync-control-plane.sh:ro"
+  -v "$REPO_ROOT/config/nvim:/etc/sandbox/nvim-source:ro"
+  -v "$REPO_ROOT/config/starship.toml:/etc/sandbox/starship.toml:ro"
+  -v "$REPO_ROOT/config/workspace-seed:/etc/sandbox/workspace-seed:ro"
+  -v "$REPO_ROOT/bin/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro"
+)
+
+if [[ "$COMMAND" == "export" ]]; then
+  sandbox_export_workspace
+  exit 0
+fi
+
+if [[ "$COMMAND" == "sync" ]]; then
+  sandbox_sync_control_plane
+  exit 0
+fi
+
+if [[ "$COMMAND" == "skills" ]]; then
+  if [[ "$SKILLS_SUBCOMMAND" == "index" ]]; then
+    sandbox_skills_index
+    exit 0
+  fi
+
+  if [[ "$SKILLS_SUBCOMMAND" == "audit" ]]; then
+    sandbox_skills_audit
+    exit 0
+  fi
+
+  sandbox_skills_export "${@:3}"
+  exit 0
+fi
+
+build_image_if_needed
+
+PORT_ARGS=()
+if [[ -n "$PORTS" ]]; then
+  for port in $PORTS; do
+    PORT_ARGS+=( -p "${port}:${port}" )
+  done
+fi
+
+TTY_ARGS=( -i )
+if [[ -t 0 && -t 1 ]]; then
+  TTY_ARGS=( -it )
+fi
+
+if [[ -z "$HOME_BIND" ]]; then
+  docker volume create "$HOME_VOLUME" >/dev/null
+fi
+
+if [[ -z "$WORKSPACE_BIND" ]]; then
+  docker volume create "$WORKSPACE_VOLUME" >/dev/null
+fi
+
+if [[ -z "$HOME_BIND" || -z "$WORKSPACE_BIND" ]]; then
+  docker run --rm \
+    --entrypoint bash \
+    -e HOME=/home/sandbox \
+    -e XDG_CONFIG_HOME=/home/sandbox/.config \
+    -e XDG_CACHE_HOME=/home/sandbox/.cache \
+    -e XDG_DATA_HOME=/home/sandbox/.local/share \
+    -e XDG_STATE_HOME=/home/sandbox/.local/state \
+    -e SANDBOX_BOOTSTRAP_QUARTZ \
+    -e SANDBOX_QUARTZ_TEMPLATE \
+    -e SANDBOX_QUARTZ_BASE_URL \
+    -e SANDBOX_QUARTZ_LINKS \
+    "${HOME_MOUNT_ARGS[@]}" \
+    "${WORKSPACE_MOUNT_ARGS[@]}" \
+    "${CONTROL_PLANE_MOUNT_ARGS[@]}" \
+    "$IMAGE_NAME" \
+    -lc "mkdir -p /home/sandbox/.config /home/sandbox/.cache /home/sandbox/.local/share /home/sandbox/.local/state /workspace && /usr/local/bin/sync-control-plane.sh && /usr/local/bin/bootstrap-workspace.sh && chown -R $USER_ID:$GROUP_ID /home/sandbox /workspace"
+fi
+
+sandbox_collect_runtime_args
+
+exec docker run --rm "${TTY_ARGS[@]}" \
+  "${RUNTIME_ARGS[@]}" \
+  --user "$USER_ID:$GROUP_ID" \
+  -e HOME=/home/sandbox \
+  -e TERM="${TERM:-xterm-256color}" \
+  -e SANDBOX_BOOTSTRAP_QUARTZ \
+  -e SANDBOX_QUARTZ_TEMPLATE \
+  -e SANDBOX_QUARTZ_BASE_URL \
+  -e SANDBOX_QUARTZ_LINKS \
+  "${ENV_ARGS[@]}" \
+  "${HOME_MOUNT_ARGS[@]}" \
+  "${WORKSPACE_MOUNT_ARGS[@]}" \
+  "${CONTROL_PLANE_MOUNT_ARGS[@]}" \
+  "${EXTRA_MOUNT_ARGS[@]}" \
+  -w /workspace \
+  "${PORT_ARGS[@]}" \
+  "$IMAGE_NAME" \
+  "$@"

@@ -1,0 +1,34 @@
+{
+  // Docker image tag built from this repo.
+  "imageName": "project-about-ai-cost-optimization:local",
+  // Persistent Docker-managed home volume for the sandbox user.
+  "homeVolumeName": "project-about-ai-cost-optimization-sandbox-home",
+  // Persistent Docker-managed workspace volume for research state.
+  "workspaceVolumeName": "project-about-ai-cost-optimization-workspace",
+  // Repo-local directory for timestamped workspace exports.
+  "exportDirectory": "exports",
+  "bootstrap": {
+    "quartz": {
+      // Initialize a Quartz workspace on first boot when the workspace is empty.
+      "enabled": 1,
+      // Keep these generic so other repos can override them locally if needed.
+      "template": "default",
+      "baseUrl": "localhost",
+      "links": "relative"
+    }
+  },
+  "runtime": {
+    // Set to 1 to disable the default runtime hardening flags.
+    "disableHardening": 0,
+    // Basic process-count guardrail inside the container.
+    "pidLimit": 512,
+    // Make the container root filesystem read-only by default.
+    "readOnlyRoot": 1
+  },
+  "measurement": {
+    // Soft guardrail for the built image size.
+    "maxImageSizeMb": 4096,
+    // Soft guardrail for persistent sandbox home state.
+    "maxHomeSizeMb": 2048
+  }
+}

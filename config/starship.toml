@@ -1,0 +1,20 @@
+add_newline = false
+
+format = "$directory$git_branch$git_status$line_break$character"
+
+[directory]
+format = "[Sandbox $path]($style)"
+style = "bold green"
+truncation_length = 3
+
+[git_branch]
+format = " [git:$branch]($style)"
+style = "bold blue"
+
+[git_status]
+format = "[$all_status$ahead_behind]($style)"
+style = "bold yellow"
+
+[character]
+success_symbol = "[>](bold green) "
+error_symbol = "[x](bold red) "

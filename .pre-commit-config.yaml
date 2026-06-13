@@ -1,0 +1,33 @@
+fail_fast: true
+default_install_hook_types: [pre-commit]
+
+repos:
+  - repo: builtin
+    hooks:
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json5
+        files: \.(jsonc|json5)$
+      - id: check-merge-conflict
+      - id: detect-private-key
+      - id: check-shebang-scripts-are-executable
+      - id: check-executables-have-shebangs
+
+  - repo: local
+    hooks:
+      - id: bash-syntax
+        name: bash syntax
+        entry: bin/hooks/bash-syntax-check
+        language: system
+        files: ^(bin/.*|config/.*\.sh)$
+
+      - id: node-syntax
+        name: node syntax
+        entry: bin/hooks/node-syntax-check
+        language: system
+        files: \.mjs$

@@ -1,0 +1,18 @@
+# Optional host-backed sandbox home state for local runs.
+.sandbox-home/
+
+# Timestamped workspace snapshots exported from the live sandbox.
+exports/
+
+# Local Nix build output symlink.
+result
+
+# Machine-specific sandbox config overrides.
+config/sandbox.jsonc
+
+# Local suppressions for the conservative skills audit false-positive list.
+config/skills-audit-ignore.txt
+
+# General purpose secrets
+.env
+*.env
