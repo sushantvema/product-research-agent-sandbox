@@ -3,4 +3,8 @@ export STARSHIP_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/sandbox/starship.toml"
 
 alias v='nvim'
 
+if [[ -f /etc/sandbox/shell/fzf.sh ]]; then
+  source /etc/sandbox/shell/fzf.sh
+fi
+
 eval "$(starship init bash)"

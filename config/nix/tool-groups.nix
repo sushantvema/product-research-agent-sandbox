@@ -1,4 +1,8 @@
 { pkgs, claude-code }:
+
+let
+  prek = import ./prek.nix { inherit pkgs; };
+in
 {
   ai = [
     claude-code.packages.${pkgs.system}.default
@@ -9,6 +13,7 @@
     curl
     fd
     fzf
+    go
     jq
     just
     nodejs_22

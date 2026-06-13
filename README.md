@@ -18,6 +18,8 @@ Export a timestamped snapshot of the live workspace without mutating it:
 
 ```bash
 ./bin/sandbox export
+./bin/sandbox export workspace
+./bin/sandbox export home
 ```
 
 Sync repo-owned shell, prompt, editor, and workspace-seed control-plane files into the persistent sandbox state without rebuilding the image:
@@ -89,6 +91,7 @@ This separation is intentional. In an agent-heavy workflow, the surrounding syst
 - `config/skills-audit-ignore.example.txt`: optional local suppressions for conservative skills audit findings
 - `config/sandbox.example.jsonc`: commented launcher defaults template
 - `config/read-config.mjs`: JSONC reader for launcher scripts
+- `config/shell/`: repo-owned shell snippets layered into sandbox startup
 - `.pre-commit-config.yaml`: `prek` hook configuration
 - `FORMATTING.md`: hook policy and rationale for custom settings
 - `config/host-mounts.sh`: host mount helpers
@@ -131,6 +134,8 @@ Add new mounts in `config/host-mounts.sh` and wire them in `bin/sandbox`.
 
 Neovim and LazyVim are repo-owned and live under `config/nvim`. They are synced into sandbox state on startup so plugin metadata can be written without mutating the source config.
 
+Shell features that are likely to grow over time live under `config/shell/`. For example, the FZF Ctrl-R history integration is kept in its own snippet instead of being inlined into `config/bashrc`.
+
 ## State
 
 The sandbox home and workspace both live in Docker named volumes by default, so they persist across runs without polluting the repo.
@@ -152,7 +157,9 @@ If you explicitly want a host bind mount for the live workspace instead:
 SANDBOX_WORKSPACE_BIND="$PWD/workspace" ./bin/sandbox
 ```
 
-Use `./bin/sandbox export` to snapshot the current live workspace into a timestamped directory under `exports/`. In the default Docker-volume mode it copies from the workspace volume. If you are using `SANDBOX_WORKSPACE_BIND`, it snapshots that bind-mounted workspace path instead.
+Use `./bin/sandbox export` or `./bin/sandbox export workspace` to snapshot the current live workspace into a timestamped directory under `exports/`. In the default Docker-volume mode it copies from the workspace volume. If you are using `SANDBOX_WORKSPACE_BIND`, it snapshots that bind-mounted workspace path instead.
+
+Use `./bin/sandbox export home` to snapshot the persistent sandbox home under `exports/`. This captures user-level sandbox state such as `~/.config`, `~/.local/share`, editor state, and global tool state like OpenCode's database.
 
 Use `./bin/sandbox sync` to push repo-owned control-plane files into the current persistent home and workspace state without rebuilding the image. This is the preferred path for `config/bashrc`, `config/starship.toml`, `config/nvim/`, and `config/workspace-seed/` changes.
 

@@ -26,6 +26,7 @@ COPY config/flake.nix /tmp/bootstrap/flake.nix
 COPY config/nix /tmp/bootstrap/nix
 COPY config/bashrc /etc/sandbox/bashrc
 COPY config/bootstrap-workspace.sh /usr/local/bin/bootstrap-workspace.sh
+COPY config/shell /etc/sandbox/shell
 COPY config/sync-control-plane.sh /usr/local/bin/sync-control-plane.sh
 COPY config/nvim /etc/sandbox/nvim-source
 COPY config/workspace-seed /etc/sandbox/workspace-seed
